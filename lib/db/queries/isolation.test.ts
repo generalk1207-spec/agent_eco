@@ -115,6 +115,16 @@ describe("per-user isolation in lib/db/queries", () => {
       await expectBUntouched();
     });
 
+    it("jobs: claimJobSchedule can't claim another user's run", async () => {
+      expect(
+        await q.claimJobSchedule(a.userId, b.job.id, {
+          expectedNextRunAt: b.job.nextRunAt!,
+          nextRunAt: new Date("2030-01-01"),
+        }),
+      ).toBe(false);
+      await expectBUntouched();
+    });
+
     it("usage: incrementing A never touches B", async () => {
       await q.incrementUsage(a.userId, MONTH, { inputTokens: 1, outputTokens: 1 });
       expect((await q.getUsage(a.userId, MONTH))?.messageCount).toBe(2);
@@ -170,6 +180,29 @@ describe("per-user isolation in lib/db/queries", () => {
       const again = await q.ensurePrimaryAgent(a.userId);
       expect(again.id).toBe(a.agent.id);
       expect((await q.listAgents(a.userId)).filter((x) => x.role === "primary")).toHaveLength(1);
+    });
+
+    it("claimJobSchedule is a compare-and-set: only the first caller wins", async () => {
+      const job = await q.getJob(a.userId, a.job.id);
+      const expectedNextRunAt = job!.nextRunAt!;
+      const nextRunAt = new Date(expectedNextRunAt.getTime() + 60_000);
+
+      expect(await q.claimJobSchedule(a.userId, a.job.id, { expectedNextRunAt, nextRunAt })).toBe(
+        true,
+      );
+      // A second heartbeat sees the old value gone and backs off.
+      expect(await q.claimJobSchedule(a.userId, a.job.id, { expectedNextRunAt, nextRunAt })).toBe(
+        false,
+      );
+      expect((await q.getJob(a.userId, a.job.id))?.nextRunAt).toEqual(nextRunAt);
+    });
+
+    it("markJobRun without nextRunAt leaves the schedule alone", async () => {
+      const before = await q.getJob(a.userId, a.job.id);
+      const lastRunAt = new Date();
+      const after = await q.markJobRun(a.userId, a.job.id, { lastRunAt });
+      expect(after?.lastRunAt).toEqual(lastRunAt);
+      expect(after?.nextRunAt).toEqual(before?.nextRunAt);
     });
 
     it("listDueJobs returns only identifiers for enabled, due jobs", async () => {

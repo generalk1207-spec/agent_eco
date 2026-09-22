@@ -62,17 +62,42 @@ export async function setJobEnabled(
   return updateJob(userId, jobId, { enabled });
 }
 
+/** Omit nextRunAt to record the run without touching the schedule. */
 export async function markJobRun(
   userId: string,
   jobId: string,
-  { lastRunAt, nextRunAt }: { lastRunAt: Date; nextRunAt: Date | null },
+  { lastRunAt, nextRunAt }: { lastRunAt: Date; nextRunAt?: Date | null },
 ): Promise<ScheduledJob | undefined> {
   const [row] = await db
     .update(scheduledJobs)
-    .set({ lastRunAt, nextRunAt })
+    .set(nextRunAt === undefined ? { lastRunAt } : { lastRunAt, nextRunAt })
     .where(and(eq(scheduledJobs.userId, userId), eq(scheduledJobs.id, jobId)))
     .returning();
   return row;
+}
+
+/**
+ * Compare-and-set on next_run_at: advances the schedule only if it still holds
+ * `expectedNextRunAt`. Returns false if another heartbeat already claimed this run,
+ * so overlapping heartbeats can't both enqueue the same job.
+ */
+export async function claimJobSchedule(
+  userId: string,
+  jobId: string,
+  { expectedNextRunAt, nextRunAt }: { expectedNextRunAt: Date; nextRunAt: Date | null },
+): Promise<boolean> {
+  const rows = await db
+    .update(scheduledJobs)
+    .set({ nextRunAt })
+    .where(
+      and(
+        eq(scheduledJobs.userId, userId),
+        eq(scheduledJobs.id, jobId),
+        eq(scheduledJobs.nextRunAt, expectedNextRunAt),
+      ),
+    )
+    .returning({ id: scheduledJobs.id });
+  return rows.length > 0;
 }
 
 /** Returns true if a row was deleted. */

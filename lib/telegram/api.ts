@@ -40,7 +40,7 @@ const isParseError = (err: unknown) =>
  * Sends HTML, split into as many messages as needed. If Telegram rejects a chunk's markup,
  * that chunk is re-sent as plain text so the user still gets the reply.
  */
-export async function sendHtml(chatId: number, html: string): Promise<void> {
+export async function sendHtml(chatId: number | string, html: string): Promise<void> {
   for (const chunk of splitTelegramHtml(html)) {
     try {
       await callTelegram("sendMessage", {
