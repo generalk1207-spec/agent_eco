@@ -1,23 +1,44 @@
 import Link from "next/link";
-import { requireActiveUser } from "@/lib/auth/session";
+import { Chat, type ChatMessage } from "@/components/chat";
 import { SignOutButton } from "@/components/sign-out-button";
+import { requireActiveUser } from "@/lib/auth/session";
+import { ensurePrimaryAgent, listChats, listMessages } from "@/lib/db/queries";
+
+const HISTORY_LIMIT = 50;
 
 export default async function Home() {
   const session = await requireActiveUser();
+  const userId = session.user.id;
+
+  const agent = await ensurePrimaryAgent(userId);
+  // Continue the most recent web conversation, the same one runAgent would pick up.
+  const [latest] = await listChats(userId, { agentId: agent.id, channel: "web" });
+  const history = latest ? await listMessages(userId, latest.id, { limit: HISTORY_LIMIT }) : [];
+
+  const initialMessages: ChatMessage[] = history.flatMap((m) =>
+    m.role === "user" || m.role === "assistant"
+      ? [{ id: m.id, role: m.role, content: m.content }]
+      : [],
+  );
 
   return (
-    <main className="mx-auto flex w-full max-w-2xl flex-col gap-6 p-8">
-      <header className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold">
-          Hi{session.user.name ? `, ${session.user.name.split(" ")[0]}` : ""}
-        </h1>
+    <div className="flex min-h-full flex-1 flex-col">
+      <Chat
+        initialMessages={initialMessages}
+        initialChatId={latest?.id}
+        agentName={agent.name}
+      />
+      <nav className="flex justify-center gap-4 border-t border-neutral-200 py-3 text-sm text-neutral-500 dark:border-neutral-800">
+        <Link href="/settings" className="underline">
+          Settings
+        </Link>
+        {session.user.isAdmin && (
+          <Link href="/admin" className="underline">
+            Admin
+          </Link>
+        )}
         <SignOutButton />
-      </header>
-      <p className="text-neutral-500">Chat is coming soon.</p>
-      <nav className="flex gap-4 text-sm underline">
-        <Link href="/settings">Settings</Link>
-        {session.user.isAdmin && <Link href="/admin">Admin</Link>}
       </nav>
-    </main>
+    </div>
   );
 }

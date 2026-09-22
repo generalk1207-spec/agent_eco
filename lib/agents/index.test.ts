@@ -17,6 +17,7 @@ type GenerateResult = Awaited<ReturnType<MockLanguageModelV4["doGenerate"]>>;
 const mocks = vi.hoisted(() => ({
   limit: vi.fn(),
   memorySearch: vi.fn(),
+  documentSearch: vi.fn(),
   memoryAdd: vi.fn(),
   listConnectedAccounts: vi.fn(),
   createComposioSession: vi.fn(),
@@ -28,7 +29,7 @@ vi.mock("@/lib/upstash", () => ({ createRatelimit: () => ({ limit: mocks.limit }
 
 vi.mock("supermemory", () => ({
   default: class {
-    search = { memories: mocks.memorySearch };
+    search = { memories: mocks.memorySearch, documents: mocks.documentSearch };
     add = mocks.memoryAdd;
   },
 }));
@@ -100,6 +101,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   mocks.limit.mockResolvedValue({ success: true, limit: 10, remaining: 9, reset: Date.now() + 60_000 });
   mocks.memorySearch.mockResolvedValue({ results: [], timing: 0, total: 0 });
+  mocks.documentSearch.mockResolvedValue({ results: [], timing: 0, total: 0 });
   mocks.memoryAdd.mockResolvedValue({ id: "mem_1", status: "queued" });
   mocks.listConnectedAccounts.mockResolvedValue({ items: [] });
   mocks.agentGenerate.mockResolvedValue(textReply("Hello!"));
@@ -265,6 +267,12 @@ describe("per-user isolation", () => {
       timing: 0,
       total: 1,
     }));
+    mocks.documentSearch.mockImplementation(async ({ containerTags }: { containerTags: string[] }) => ({
+      results: [],
+      timing: 0,
+      total: 0,
+      _tags: containerTags,
+    }));
     mocks.listConnectedAccounts.mockImplementation(async ({ userIds }: { userIds: string[] }) => ({
       items: userIds.flatMap((id) => (toolkitsByUser[id] ? [{ toolkit: { slug: toolkitsByUser[id] } }] : [])),
     }));
@@ -293,9 +301,11 @@ describe("per-user isolation", () => {
       const { chatId } = await runAgent({ userId: self.userId, message: "hi", channel: "web" });
 
       // Supermemory: every read and write uses only this user's container.
-      const tags = [...mocks.memorySearch.mock.calls, ...mocks.memoryAdd.mock.calls].map(
-        ([params]) => params.containerTag,
-      );
+      const tags = [
+        ...mocks.memorySearch.mock.calls.map(([p]) => p.containerTag),
+        ...mocks.memoryAdd.mock.calls.map(([p]) => p.containerTag),
+        ...mocks.documentSearch.mock.calls.flatMap(([p]) => p.containerTags as string[]),
+      ];
       expect(tags.length).toBeGreaterThanOrEqual(2);
       expect(new Set(tags)).toEqual(new Set([`user-${self.userId}`]));
 

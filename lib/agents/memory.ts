@@ -12,22 +12,42 @@ const supermemory = () => (client ??= new Supermemory({ apiKey: env.SUPERMEMORY_
 /** Every Supermemory read and write is scoped to this tag. Never pass another user's id. */
 export const memoryContainerTag = (userId: string) => `user-${userId}`;
 
-/** Memories relevant to `query`, from this user's container only. Returns [] if Supermemory fails. */
+/**
+ * Memories relevant to `query`, from this user's container only. Returns [] if Supermemory fails.
+ *
+ * Reads from two places, because they become available at different times:
+ * - `search.memories` returns facts Supermemory has distilled, which only exist once its
+ *   asynchronous extraction ("dreaming") finishes — minutes later, or not at all on some plans.
+ * - `search.documents` returns what we wrote, searchable within seconds.
+ * Without the document fallback, anything the user said recently is invisible to the agent.
+ */
 export async function recallMemories(userId: string, query: string, limit = 5): Promise<string[]> {
-  try {
-    const { results } = await supermemory().search.memories({
-      q: query,
-      containerTag: memoryContainerTag(userId),
-      limit,
-    });
-    return results.flatMap((r) => {
-      const text = r.memory ?? r.chunk;
-      return text ? [text] : [];
-    });
-  } catch (err) {
-    console.error("[agents] memory recall failed", err);
-    return [];
-  }
+  const containerTag = memoryContainerTag(userId);
+
+  const [extracted, written] = await Promise.all([
+    supermemory()
+      .search.memories({ q: query, containerTag, limit })
+      .then(({ results }) => results.flatMap((r) => (r.memory ?? r.chunk ? [r.memory ?? r.chunk!] : [])))
+      .catch((err) => {
+        console.error("[agents] memory recall failed", err);
+        return [] as string[];
+      }),
+    supermemory()
+      .search.documents({ q: query, containerTags: [containerTag], limit })
+      .then(({ results }) =>
+        results.flatMap((doc) => {
+          const chunks = doc.chunks?.filter((c) => c.isRelevant).map((c) => c.content) ?? [];
+          return chunks.length > 0 ? chunks : doc.title ? [doc.title] : [];
+        }),
+      )
+      .catch((err) => {
+        console.error("[agents] document recall failed", err);
+        return [] as string[];
+      }),
+  ]);
+
+  // Same fact can come back from both sources; keep first occurrence, cap at `limit`.
+  return [...new Set([...extracted, ...written].map((t) => t.trim()).filter(Boolean))].slice(0, limit);
 }
 
 /** Lets the agent look up more of this user's memories mid-conversation. */
