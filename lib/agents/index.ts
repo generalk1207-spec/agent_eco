@@ -1,50 +1,109 @@
 import {
   addMessage,
   createChat,
+  currentMonth,
   ensurePrimaryAgent,
   getAgent,
   getChat,
   getOrCreateChat,
+  incrementUsage,
+  listAgents,
+  listMessages,
   NotFoundError,
 } from "@/lib/db/queries";
-import type { ChatChannel } from "@/lib/db/schema";
+import type { Agent, Chat, ChatChannel } from "@/lib/db/schema";
+import { ensureTracing, flushTracing, withAgentTrace } from "@/lib/tracing";
+import { loadComposioTools } from "./composio";
+import type { RunContext } from "./context";
+import { enforceLimits } from "./limits";
+import { buildMemoryTools, rememberFacts } from "./memory";
+import { runAgentTurn } from "./primary";
+import { buildDelegationTools } from "./specialized";
 import type { AgentChannel, RunAgent } from "./types";
 
 export type { AgentChannel, RunAgent, RunAgentInput, RunAgentResult } from "./types";
 export { AgentError, BudgetExceededError, RateLimitError, isAgentError } from "./errors";
 
+const HISTORY_LIMIT = 30;
+const EMPTY_REPLY = "Sorry, I wasn't able to finish that. Could you try rephrasing?";
+
 // Scheduled runs are persisted as web chats (the chats.channel enum is web | telegram).
 const toChatChannel = (channel: AgentChannel): ChatChannel =>
   channel === "telegram" ? "telegram" : "web";
 
-/**
- * STUB: echoes the message back so other branches can integrate now.
- * The agent-core branch replaces the body; the signature is fixed by ./types.ts.
- */
 export const runAgent: RunAgent = async ({ userId, chatId, agentId, message, channel }) => {
-  const chat = await resolveChat(userId, { chatId, agentId, channel });
+  ensureTracing();
+  await enforceLimits(userId);
 
-  await addMessage(userId, { chatId: chat.id, role: "user", content: message });
-  const text = message;
-  await addMessage(userId, { chatId: chat.id, role: "assistant", content: text });
+  const { chat, agent } = await resolveChatAndAgent(userId, { chatId, agentId, channel });
+  const ctx: RunContext = {
+    userId,
+    chatId: chat.id,
+    channel,
+    usage: { inputTokens: 0, outputTokens: 0 },
+  };
 
-  return { text, chatId: chat.id };
+  try {
+    return await withAgentTrace("agent-run", ctx, async () => {
+      // Load history before saving this turn so the new message isn't duplicated in the prompt.
+      const history = await listMessages(userId, chat.id, { limit: HISTORY_LIMIT });
+      await addMessage(userId, { chatId: chat.id, role: "user", content: message });
+
+      const [composioTools, specialists] = await Promise.all([
+        loadComposioTools(userId),
+        agent.role === "primary"
+          ? listAgents(userId).then((agents) => agents.filter((a) => a.role === "specialized"))
+          : [],
+      ]);
+      const tools = {
+        ...composioTools,
+        ...buildMemoryTools(userId),
+        ...buildDelegationTools(ctx, specialists, composioTools),
+      };
+
+      const text = (await runAgentTurn({ ctx, agent, history, message, tools })).trim() || EMPTY_REPLY;
+
+      await Promise.all([
+        addMessage(userId, { chatId: chat.id, role: "assistant", content: text }),
+        rememberFacts(ctx, { user: message, assistant: text }),
+      ]);
+      return { text, chatId: chat.id };
+    });
+  } finally {
+    // Record usage even when the run fails partway, so tokens already spent are billed.
+    await recordUsage(ctx);
+    flushTracing();
+  }
 };
 
-async function resolveChat(
+async function recordUsage({ userId, usage }: RunContext): Promise<void> {
+  try {
+    await incrementUsage(userId, currentMonth(), usage);
+  } catch (err) {
+    console.error(`[agents] failed to record usage for user ${userId}`, usage, err);
+  }
+}
+
+/**
+ * With a chatId, continues that chat with its own agent (agentId is ignored).
+ * Without one, uses the latest chat for the agent + channel; scheduled runs always start a new chat.
+ */
+async function resolveChatAndAgent(
   userId: string,
   { chatId, agentId, channel }: { chatId?: string; agentId?: string; channel: AgentChannel },
-) {
+): Promise<{ chat: Chat; agent: Agent }> {
   if (chatId) {
     const chat = await getChat(userId, chatId);
     if (!chat) throw new NotFoundError("Chat", chatId);
-    return chat;
+    const agent = await getAgent(userId, chat.agentId);
+    if (!agent) throw new NotFoundError("Agent", chat.agentId);
+    return { chat, agent };
   }
 
   const agent = agentId ? await getAgent(userId, agentId) : await ensurePrimaryAgent(userId);
   if (!agent) throw new NotFoundError("Agent", agentId!);
 
-  // Scheduled runs always start a fresh chat; interactive channels continue the latest one.
   const input = { agentId: agent.id, channel: toChatChannel(channel) };
-  return channel === "scheduled" ? createChat(userId, input) : getOrCreateChat(userId, input);
+  const chat = channel === "scheduled" ? await createChat(userId, input) : await getOrCreateChat(userId, input);
+  return { chat, agent };
 }

@@ -1,0 +1,17 @@
+import type { LanguageModelUsage } from "ai";
+import type { TraceContext } from "@/lib/tracing";
+import type { AgentChannel } from "./types";
+
+export type TokenUsage = { inputTokens: number; outputTokens: number };
+
+/** Per-run state shared by the primary agent, delegations and memory writes. */
+export type RunContext = TraceContext & {
+  channel: AgentChannel;
+  /** Accumulates tokens across every model call in the run; recorded to the usage table at the end. */
+  usage: TokenUsage;
+};
+
+export function addUsage(total: TokenUsage, usage: LanguageModelUsage): void {
+  total.inputTokens += usage.inputTokens ?? 0;
+  total.outputTokens += usage.outputTokens ?? 0;
+}
