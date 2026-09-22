@@ -28,7 +28,15 @@ This is a multi-tenant product sold to other people. It has two interfaces: the 
 - **Composio:** per-user tools. Use `new Composio({ provider: new VercelProvider() })`, then `composio.create(userId)` and `session.tools()`. Always pass our `userId`.
 - **Supermemory:** use the core `supermemory` SDK wrapped in our own AI SDK `tool()`s. Scope every call with `containerTag: \`user-${userId}\``. `@supermemory/tools` is **not** installed because it's incompatible with AI SDK 7.
 - **Langfuse:** via OpenTelemetry (`@langfuse/otel`, `@langfuse/vercel-ai-sdk`). Pass `LANGFUSE_HOST` as `baseUrl`. In serverless handlers, flush with `after(() => spanProcessor.forceFlush())`.
+- **Telegram:** no SDK. `lib/telegram/api.ts` wraps the Bot API with `fetch`, and `lib/telegram/types.ts` has zod schemas for updates. Extend those instead of adding a dependency.
 - **Other:** zod 4, cron-parser, Vitest.
+
+## Deployment notes
+
+- **Long-running routes:** the Vercel default timeout is 10s. Any route that calls `runAgent` sets `export const maxDuration = 60;` in its own `route.ts`. Don't add a shared `vercel.json`.
+- **Scheduling:** Vercel Cron on the Hobby plan only runs about once a day, so it can't drive the heartbeat. Use a **QStash schedule** pointed at `${APP_URL}/api/cron/heartbeat` instead, and verify the QStash signature with `qstashReceiver` from `lib/upstash.ts`.
+- **Waitlist:** production runs with `WAITLIST_MODE=true`, so new sign-ups land on `/waitlist` until an admin activates them at `/admin`. Local development runs with it `false`.
+- **CI:** `.github/workflows/ci.yml` runs typecheck, lint and test on every push and PR. It never touches the real database — the DB tests use PGlite.
 
 ## Directory map and branch ownership
 
