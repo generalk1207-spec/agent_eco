@@ -13,6 +13,11 @@ export default async function SettingsPage() {
         <dt className="text-neutral-500">Timezone</dt>
         <dd>{session.user.timezone}</dd>
       </dl>
+      <nav className="flex flex-col gap-2 text-sm">
+        <Link href="/settings/telegram" className="underline">
+          Telegram
+        </Link>
+      </nav>
       <p className="text-neutral-500">More settings coming soon.</p>
       <Link href="/" className="text-sm underline">
         Back

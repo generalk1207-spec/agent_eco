@@ -1,74 +1,69 @@
 import { env } from "@/lib/env";
+import { htmlToPlainText } from "./format";
+import { splitTelegramHtml } from "./split";
 
-/**
- * Minimal Telegram Bot API client. No SDK: the webhook bot only needs a few methods.
- * Docs: https://core.telegram.org/bots/api
- */
-
-const API_BASE = "https://api.telegram.org";
+type TelegramResponse<T> =
+  | { ok: true; result: T }
+  | { ok: false; error_code: number; description: string };
 
 export class TelegramApiError extends Error {
   constructor(
     readonly method: string,
-    readonly errorCode: number | undefined,
-    description: string,
+    readonly status: number,
+    readonly description: string,
   ) {
-    super(`Telegram ${method} failed (${errorCode ?? "no code"}): ${description}`);
+    super(`Telegram ${method} failed (${status}): ${description}`);
     this.name = "TelegramApiError";
   }
 }
 
-type TelegramResponse<T> = {
-  ok: boolean;
-  result?: T;
-  error_code?: number;
-  description?: string;
-};
-
-export async function callTelegram<T>(method: string, body: Record<string, unknown>): Promise<T> {
-  const res = await fetch(`${API_BASE}/bot${env.TELEGRAM_BOT_TOKEN}/${method}`, {
+export async function callTelegram<T = unknown>(
+  method: string,
+  body: Record<string, unknown>,
+): Promise<T> {
+  const res = await fetch(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/${method}`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(body),
   });
-
-  const data = (await res.json()) as TelegramResponse<T>;
-  if (!data.ok || data.result === undefined) {
-    throw new TelegramApiError(method, data.error_code, data.description ?? "unknown error");
+  const data = (await res.json().catch(() => null)) as TelegramResponse<T> | null;
+  if (!data?.ok) {
+    throw new TelegramApiError(method, res.status, data?.description ?? res.statusText);
   }
   return data.result;
 }
 
-export function sendMessage(
-  chatId: string | number,
-  text: string,
-  options: Record<string, unknown> = {},
-) {
-  return callTelegram<{ message_id: number }>("sendMessage", {
-    chat_id: chatId,
-    text,
-    ...options,
-  });
+const isParseError = (err: unknown) =>
+  err instanceof TelegramApiError && /can't parse entities/i.test(err.description);
+
+/**
+ * Sends HTML, split into as many messages as needed. If Telegram rejects a chunk's markup,
+ * that chunk is re-sent as plain text so the user still gets the reply.
+ */
+export async function sendHtml(chatId: number, html: string): Promise<void> {
+  for (const chunk of splitTelegramHtml(html)) {
+    try {
+      await callTelegram("sendMessage", {
+        chat_id: chatId,
+        text: chunk,
+        parse_mode: "HTML",
+        link_preview_options: { is_disabled: true },
+      });
+    } catch (err) {
+      if (!isParseError(err)) throw err;
+      await callTelegram("sendMessage", { chat_id: chatId, text: htmlToPlainText(chunk) });
+    }
+  }
 }
 
-export function sendChatAction(chatId: string | number, action = "typing") {
-  return callTelegram<boolean>("sendChatAction", { chat_id: chatId, action });
-}
-
-/** Point Telegram at our webhook. secret_token is echoed back in X-Telegram-Bot-Api-Secret-Token. */
-export function setWebhook(url: string) {
-  return callTelegram<boolean>("setWebhook", {
-    url,
-    secret_token: env.TELEGRAM_WEBHOOK_SECRET,
-    allowed_updates: ["message", "callback_query"],
-  });
-}
-
-export function deleteWebhook() {
-  return callTelegram<boolean>("deleteWebhook", {});
-}
-
-/** True when the request really came from Telegram. Check this first in the webhook handler. */
-export function isValidWebhookSecret(header: string | null): boolean {
-  return header === env.TELEGRAM_WEBHOOK_SECRET;
+/**
+ * Shows "typing…" until the returned stop function is called. Telegram clears the action
+ * after about 5 seconds, so it's refreshed every 4.
+ */
+export function startTyping(chatId: number): () => void {
+  const send = () =>
+    callTelegram("sendChatAction", { chat_id: chatId, action: "typing" }).catch(() => {});
+  void send();
+  const timer = setInterval(send, 4_000);
+  return () => clearInterval(timer);
 }

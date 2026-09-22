@@ -1,32 +1,25 @@
 import { z } from "zod";
 
-/** Just enough of the Telegram update shape for a text-message bot. Extend as needed. */
+/**
+ * The subset of the Telegram Bot API update shape this bot reads.
+ * Schemas are the source of truth; the types are inferred from them so the webhook
+ * can validate an untrusted payload with safeParse and still get exact types.
+ */
 
 export const telegramChatSchema = z.object({
   id: z.number(),
-  type: z.string(),
-  username: z.string().optional(),
-});
-
-export const telegramUserSchema = z.object({
-  id: z.number(),
-  is_bot: z.boolean(),
-  first_name: z.string(),
-  username: z.string().optional(),
+  type: z.enum(["private", "group", "supergroup", "channel"]),
 });
 
 export const telegramMessageSchema = z.object({
   message_id: z.number(),
-  date: z.number(),
   chat: telegramChatSchema,
-  from: telegramUserSchema.optional(),
   text: z.string().optional(),
 });
 
 export const telegramUpdateSchema = z.object({
   update_id: z.number(),
   message: telegramMessageSchema.optional(),
-  edited_message: telegramMessageSchema.optional(),
 });
 
 export type TelegramChat = z.infer<typeof telegramChatSchema>;
