@@ -9,12 +9,17 @@ vi.mock("@/lib/db", async () => (await import("@/test/db")).createTestDbModule()
 const fake = vi.hoisted(() => ({}) as ReturnType<typeof import("@/lib/heartbeat/testing").createFakeUpstash>);
 vi.mock("@/lib/upstash", async (importOriginal) => {
   Object.assign(fake, (await import("@/lib/heartbeat/testing")).createFakeUpstash());
-  return { ...(await importOriginal<typeof import("@/lib/upstash")>()), redis: fake.redis, qstash: fake.qstash };
+  return { ...(await importOriginal<typeof import("@/lib/upstash")>()), redis: fake.redis, qstash: fake.qstash, createRatelimit: fake.createRatelimit };
 });
 const agents = vi.hoisted(() => ({ runAgent: vi.fn() }));
 vi.mock("@/lib/agents", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/agents")>();
-  agents.runAgent.mockImplementation(actual.runAgent);
+  // The worker is tested against the runAgent contract, not the agent itself: the real
+  // implementation would call Anthropic, Composio and Supermemory.
+  agents.runAgent.mockImplementation(async ({ message, chatId }) => ({
+    text: message,
+    chatId: chatId ?? "test-chat",
+  }));
   return { ...actual, runAgent: agents.runAgent };
 });
 
@@ -79,7 +84,7 @@ describe("POST /api/jobs/run: running", () => {
     const saved = (await q.getJob(user.id, job.id))!;
     expect(saved.lastRunAt).not.toBeNull();
     expect(saved.nextRunAt).toEqual(job.nextRunAt);
-    expect(sentTexts()).toEqual([{ chat_id: "tg-happy", text: job.prompt }]); // echo stub
+    expect(sentTexts()).toEqual([{ chat_id: "tg-happy", text: job.prompt }]); // faked runAgent echoes
     expect(fake.redis.store.has(jobLockKey(job.id))).toBe(false); // lock released
   });
 

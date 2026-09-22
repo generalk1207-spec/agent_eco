@@ -59,7 +59,10 @@ export function createFakeUpstash() {
   const qstash = {
     publishJSON: vi.fn<(req: unknown) => Promise<{ messageId: string }>>(async () => ({ messageId: crypto.randomUUID() })),
   };
-  return { redis, qstash };
+  // runAgent rate-limits every run; without this the limiter would reach for a real Redis.
+  const limit = vi.fn(async () => ({ success: true, limit: 0, remaining: 0, reset: 0 }));
+  const createRatelimit = vi.fn(() => ({ limit }));
+  return { redis, qstash, limit, createRatelimit };
 }
 
 export async function seedUser(email: string, opts: { timezone?: string; telegramChatId?: string } = {}) {

@@ -7,7 +7,7 @@ vi.mock("@/lib/db", async () => (await import("@/test/db")).createTestDbModule()
 const fake = vi.hoisted(() => ({}) as ReturnType<typeof import("@/lib/heartbeat/testing").createFakeUpstash>);
 vi.mock("@/lib/upstash", async (importOriginal) => {
   Object.assign(fake, (await import("@/lib/heartbeat/testing")).createFakeUpstash());
-  return { ...(await importOriginal<typeof import("@/lib/upstash")>()), redis: fake.redis, qstash: fake.qstash };
+  return { ...(await importOriginal<typeof import("@/lib/upstash")>()), redis: fake.redis, qstash: fake.qstash, createRatelimit: fake.createRatelimit };
 });
 
 const PATH = "/api/cron/heartbeat";
