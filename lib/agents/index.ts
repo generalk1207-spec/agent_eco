@@ -33,13 +33,14 @@ const toChatChannel = (channel: AgentChannel): ChatChannel =>
 
 export const runAgent: RunAgent = async ({ userId, chatId, agentId, message, channel }) => {
   ensureTracing();
-  await enforceLimits(userId);
+  const user = await enforceLimits(userId);
 
   const { chat, agent } = await resolveChatAndAgent(userId, { chatId, agentId, channel });
   const ctx: RunContext = {
     userId,
     chatId: chat.id,
     channel,
+    timezone: user.timezone,
     usage: { inputTokens: 0, outputTokens: 0 },
   };
 

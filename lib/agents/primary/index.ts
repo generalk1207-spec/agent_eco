@@ -9,14 +9,32 @@ const MAX_STEPS = 10;
 /** Routes calling runAgent allow 60s; leave headroom for saving messages and memory afterwards. */
 const TURN_TIMEOUT_MS = 45_000;
 
-export function buildSystemPrompt(soul: string, memories: string[]): string {
-  if (memories.length === 0) return soul;
-  return `${soul}
+/** The model has no clock, so the current moment in the user's timezone is stated explicitly. */
+export function buildSituation(timezone: string, now: Date = new Date()): string {
+  const stamp = new Intl.DateTimeFormat("en-US", {
+    timeZone: timezone,
+    dateStyle: "full",
+    timeStyle: "short",
+  }).format(now);
+  return `<situation>
+Right now it is ${stamp} in the user's timezone (${timezone}).
+Use this for anything relative: "today", "tomorrow", "this week", scheduling, and deadlines.
+</situation>`;
+}
 
-<memories>
+export function buildSystemPrompt(
+  soul: string,
+  memories: string[],
+  { timezone, now }: { timezone: string; now?: Date },
+): string {
+  const parts = [soul, buildSituation(timezone, now)];
+  if (memories.length > 0) {
+    parts.push(`<memories>
 Things you remember about the user from earlier conversations. Use them when relevant; don't recite them.
 ${memories.map((m) => `- ${m}`).join("\n")}
-</memories>`;
+</memories>`);
+  }
+  return parts.join("\n\n");
 }
 
 /** Stored chat history as model messages. Only user/assistant turns are replayed. */
@@ -47,7 +65,7 @@ export async function runAgentTurn({
 
   const result = await generateText({
     model: agentModel(),
-    system: buildSystemPrompt(agent.soul, memories),
+    system: buildSystemPrompt(agent.soul, memories, { timezone: ctx.timezone }),
     messages: [...toModelMessages(history), { role: "user", content: message }],
     tools,
     stopWhen: stepCountIs(MAX_STEPS),

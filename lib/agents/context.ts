@@ -7,6 +7,8 @@ export type TokenUsage = { inputTokens: number; outputTokens: number };
 /** Per-run state shared by the primary agent, delegations and memory writes. */
 export type RunContext = TraceContext & {
   channel: AgentChannel;
+  /** The user's IANA timezone, so the agent can resolve "today", "tomorrow" and schedules. */
+  timezone: string;
   /** Accumulates tokens across every model call in the run; recorded to the usage table at the end. */
   usage: TokenUsage;
 };

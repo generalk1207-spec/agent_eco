@@ -1,4 +1,5 @@
 import type { Ratelimit } from "@upstash/ratelimit";
+import type { User } from "@/lib/db/schema";
 import { currentMonth, getUsage, getUser, NotFoundError } from "@/lib/db/queries";
 import { createRatelimit } from "@/lib/upstash";
 import { BudgetExceededError, RateLimitError } from "./errors";
@@ -33,9 +34,10 @@ function limiterFor(plan: Plan): Ratelimit {
 
 /**
  * Checks the per-minute rate limit and the monthly token budget for the user's plan.
+ * Returns the user, which the caller needs anyway (timezone, plan).
  * @throws RateLimitError | BudgetExceededError
  */
-export async function enforceLimits(userId: string, now: Date = new Date()): Promise<void> {
+export async function enforceLimits(userId: string, now: Date = new Date()): Promise<User> {
   const user = await getUser(userId);
   if (!user) throw new NotFoundError("User", userId);
   const plan = resolvePlan(user.plan);
@@ -52,4 +54,6 @@ export async function enforceLimits(userId: string, now: Date = new Date()): Pro
   if (used >= limits.monthlyTokens) {
     throw new BudgetExceededError(`User ${userId} used ${used}/${limits.monthlyTokens} tokens`);
   }
+
+  return user;
 }
