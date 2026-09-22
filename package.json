@@ -6,22 +6,50 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint .",
+    "typecheck": "next typegen && tsc --noEmit",
+    "test": "vitest run",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "drizzle-kit migrate"
   },
   "dependencies": {
+    "@ai-sdk/anthropic": "^4.0.58",
+    "@auth/drizzle-adapter": "^1.11.3",
+    "@composio/core": "^0.18.1",
+    "@composio/vercel": "^0.12.0",
+    "@langfuse/otel": "^5.11.1",
+    "@langfuse/tracing": "^5.11.1",
+    "@langfuse/vercel-ai-sdk": "^5.11.1",
+    "@neondatabase/serverless": "^1.1.0",
+    "@opentelemetry/api": "^1.9.1",
+    "@opentelemetry/sdk-node": "^0.222.0",
+    "@upstash/qstash": "^2.11.3",
+    "@upstash/ratelimit": "^2.1.0",
+    "@upstash/redis": "^1.38.4",
+    "@vercel/blob": "^2.8.0",
+    "ai": "^7.0.107",
+    "cron-parser": "^5.10.1",
+    "drizzle-orm": "^0.45.2",
     "next": "16.3.5",
+    "next-auth": "5.0.0-beta.32",
     "react": "19.2.8",
-    "react-dom": "19.2.8"
+    "react-dom": "19.2.8",
+    "supermemory": "^4.25.4",
+    "zod": "^4.6.5"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "^0.5.8",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "dotenv": "^18.0.1",
+    "drizzle-kit": "^0.31.10",
     "eslint": "^9",
     "eslint-config-next": "16.3.5",
     "tailwindcss": "^4",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "^5.0.1"
   },
   "packageManager": "pnpm@12.5.1"
 }
